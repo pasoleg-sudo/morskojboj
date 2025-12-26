@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Морской бой</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      font-family: "Segoe UI", Tahoma, sans-serif;
+    }
+
+    body {
+      margin: 0;
+      padding: 24px;
+      background: #0f172a;
+      color: #e2e8f0;
+    }
+
+    h1 {
+      margin: 0 0 8px;
+      font-size: 28px;
+    }
+
+    .layout {
+      display: grid;
+      gap: 24px;
+      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+      align-items: start;
+    }
+
+    .panel {
+      background: #111827;
+      border: 1px solid #1f2937;
+      border-radius: 16px;
+      padding: 16px;
+      box-shadow: 0 10px 30px rgba(15, 23, 42, 0.4);
+    }
+
+    .board {
+      display: grid;
+      grid-template-columns: repeat(5, 44px);
+      grid-auto-rows: 44px;
+      gap: 6px;
+      justify-content: center;
+      margin-top: 12px;
+    }
+
+    .cell {
+      display: grid;
+      place-items: center;
+      border-radius: 10px;
+      border: 1px solid #1e293b;
+      background: #0b1220;
+      font-weight: 600;
+      cursor: pointer;
+      transition: transform 0.12s ease, background 0.12s ease;
+      user-select: none;
+    }
+
+    .cell:disabled {
+      cursor: default;
+    }
+
+    .cell:hover:not(:disabled) {
+      transform: translateY(-2px);
+      background: #1e293b;
+    }
+
+    .cell.hit {
+      background: #ef4444;
+      color: #fff;
+    }
+
+    .cell.miss {
+      background: #2563eb;
+      color: #dbeafe;
+    }
+
+    .cell.ship {
+      background: #22c55e;
+      color: #052e16;
+    }
+
+    .status {
+      font-size: 14px;
+      color: #cbd5f5;
+      min-height: 38px;
+    }
+
+    button {
+      background: #3b82f6;
+      color: #fff;
+      border: none;
+      border-radius: 10px;
+      padding: 10px 14px;
+      font-weight: 600;
+      cursor: pointer;
+      margin-top: 12px;
+    }
+
+    button:hover {
+      background: #2563eb;
+    }
+
+    .legend {
+      display: flex;
+      gap: 12px;
+      margin-top: 8px;
+      font-size: 12px;
+    }
+
+    .legend span {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .legend i {
+      width: 12px;
+      height: 12px;
+      border-radius: 4px;
+      display: inline-block;
+    }
+
+    .legend .hit { background: #ef4444; }
+    .legend .miss { background: #2563eb; }
+    .legend .ship { background: #22c55e; }
+  </style>
+</head>
+<body>
+  <h1>Морской бой</h1>
+  <p class="status" id="status">Выберите клетку на поле компьютера, чтобы сделать выстрел.</p>
+
+  <div class="layout">
+    <section class="panel">
+      <h2>Поле компьютера</h2>
+      <div class="board" id="computer-board" aria-label="Поле компьютера"></div>
+      <div class="legend">
+        <span><i class="hit"></i> Попадание</span>
+        <span><i class="miss"></i> Мимо</span>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>Ваше поле</h2>
+      <div class="board" id="player-board" aria-label="Ваше поле"></div>
+      <button type="button" id="restart">Начать заново</button>
+      <div class="legend">
+        <span><i class="ship"></i> Ваш корабль</span>
+        <span><i class="hit"></i> Попадание</span>
+        <span><i class="miss"></i> Мимо</span>
+      </div>
+    </section>
+  </div>
+
+  <script>
+    const BOARD_SIZE = 5;
+    const SHIP_LENGTHS = [3, 2];
+
+    const statusEl = document.getElementById("status");
+    const computerBoardEl = document.getElementById("computer-board");
+    const playerBoardEl = document.getElementById("player-board");
+    const restartButton = document.getElementById("restart");
+
+    const createBoard = () => {
+      return {
+        ships: new Set(),
+        hits: new Set(),
+        misses: new Set(),
+      };
+    };
+
+    const coordKey = (row, col) => `${row},${col}`;
+
+    const placeShipRandom = (board, length) => {
+      let placed = false;
+      while (!placed) {
+        const horizontal = Math.random() > 0.5;
+        const row = horizontal
+          ? Math.floor(Math.random() * BOARD_SIZE)
+          : Math.floor(Math.random() * (BOARD_SIZE - length + 1));
+        const col = horizontal
+          ? Math.floor(Math.random() * (BOARD_SIZE - length + 1))
+          : Math.floor(Math.random() * BOARD_SIZE);
+        const coords = [];
+        for (let i = 0; i < length; i += 1) {
+          const r = horizontal ? row : row + i;
+          const c = horizontal ? col + i : col;
+          coords.push(coordKey(r, c));
+        }
+        if (coords.every((key) => !board.ships.has(key))) {
+          coords.forEach((key) => board.ships.add(key));
+          placed = true;
+        }
+      }
+    };
+
+    const isAllSunk = (board) => {
+      return [...board.ships].every((key) => board.hits.has(key));
+    };
+
+    const buildCells = (container, onClick) => {
+      container.innerHTML = "";
+      const cells = [];
+      for (let row = 0; row < BOARD_SIZE; row += 1) {
+        for (let col = 0; col < BOARD_SIZE; col += 1) {
+          const cell = document.createElement("button");
+          cell.type = "button";
+          cell.className = "cell";
+          cell.dataset.row = row;
+          cell.dataset.col = col;
+          cell.addEventListener("click", () => onClick(row, col));
+          cells.push(cell);
+          container.appendChild(cell);
+        }
+      }
+      return cells;
+    };
+
+    let playerBoard;
+    let computerBoard;
+    let computerShots;
+    let gameOver = false;
+    let computerCells;
+    let playerCells;
+
+    const renderBoards = () => {
+      computerCells.forEach((cell) => {
+        const row = Number(cell.dataset.row);
+        const col = Number(cell.dataset.col);
+        const key = coordKey(row, col);
+        cell.disabled = gameOver || computerBoard.hits.has(key) || computerBoard.misses.has(key);
+        cell.classList.toggle("hit", computerBoard.hits.has(key));
+        cell.classList.toggle("miss", computerBoard.misses.has(key));
+      });
+
+      playerCells.forEach((cell) => {
+        const row = Number(cell.dataset.row);
+        const col = Number(cell.dataset.col);
+        const key = coordKey(row, col);
+        cell.disabled = true;
+        cell.classList.toggle("ship", playerBoard.ships.has(key));
+        cell.classList.toggle("hit", playerBoard.hits.has(key));
+        cell.classList.toggle("miss", playerBoard.misses.has(key));
+      });
+    };
+
+    const computerTurn = () => {
+      if (gameOver) return;
+      const key = computerShots.pop();
+      if (!key) return;
+      if (playerBoard.ships.has(key)) {
+        playerBoard.hits.add(key);
+        statusEl.textContent = `Компьютер попал по ${formatCoord(key)}!`;
+      } else {
+        playerBoard.misses.add(key);
+        statusEl.textContent = `Компьютер промахнулся (${formatCoord(key)}). Ваш ход.`;
+      }
+      if (isAllSunk(playerBoard)) {
+        gameOver = true;
+        statusEl.textContent = "Вы проиграли. Все ваши корабли потоплены.";
+      }
+    };
+
+    const formatCoord = (key) => {
+      const [row, col] = key.split(",").map(Number);
+      const letter = String.fromCharCode(65 + row);
+      return `${letter}${col + 1}`;
+    };
+
+    const playerTurn = (row, col) => {
+      if (gameOver) return;
+      const key = coordKey(row, col);
+      if (computerBoard.hits.has(key) || computerBoard.misses.has(key)) {
+        return;
+      }
+      if (computerBoard.ships.has(key)) {
+        computerBoard.hits.add(key);
+        statusEl.textContent = `Попадание! (${formatCoord(key)})`;
+      } else {
+        computerBoard.misses.add(key);
+        statusEl.textContent = `Мимо. (${formatCoord(key)})`;
+      }
+      if (isAllSunk(computerBoard)) {
+        gameOver = true;
+        statusEl.textContent = "Победа! Вы потопили все корабли компьютера.";
+        renderBoards();
+        return;
+      }
+      computerTurn();
+      renderBoards();
+    };
+
+    const resetGame = () => {
+      playerBoard = createBoard();
+      computerBoard = createBoard();
+      SHIP_LENGTHS.forEach((length) => {
+        placeShipRandom(playerBoard, length);
+        placeShipRandom(computerBoard, length);
+      });
+      computerShots = [];
+      for (let row = 0; row < BOARD_SIZE; row += 1) {
+        for (let col = 0; col < BOARD_SIZE; col += 1) {
+          computerShots.push(coordKey(row, col));
+        }
+      }
+      computerShots.sort(() => Math.random() - 0.5);
+      gameOver = false;
+      statusEl.textContent = "Выберите клетку на поле компьютера, чтобы сделать выстрел.";
+      renderBoards();
+    };
+
+    computerCells = buildCells(computerBoardEl, playerTurn);
+    playerCells = buildCells(playerBoardEl, () => {});
+    restartButton.addEventListener("click", resetGame);
+
+    resetGame();
+  </script>
+</body>
+</html>
